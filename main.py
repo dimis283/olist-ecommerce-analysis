@@ -1,17 +1,17 @@
 """
 =============================================================
   Olist Brazilian E-Commerce — Demo Analysis
-  Απαιτούμενα: pip install pandas matplotlib seaborn scikit-learn
-  
-  Δομή:
-    1. Φόρτωση & επισκόπηση δεδομένων
-    2. EDA — Revenue ανά μήνα, Top κατηγορίες
-    3. RFM Segmentation πελατών
-    4. ML — Πρόβλεψη καθυστέρησης παράδοσης
+  Requirements: pip install pandas matplotlib seaborn scikit-learn
+
+  Structure:
+    1. Load & overview of data
+    2. EDA — Monthly revenue, top categories
+    3. RFM customer segmentation
+    4. ML — Delivery delay prediction
 =============================================================
-  Κατέβασε το dataset από:
+  Download the dataset from:
   https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
-  και βάλε τα CSV στον ίδιο φάκελο με αυτό το script.
+  and place the CSV files inside a folder named "db/".
 =============================================================
 """
 
@@ -26,7 +26,7 @@ from sklearn.metrics import classification_report
 import warnings
 warnings.filterwarnings("ignore")
 
-DATA_DIR = "db"  # ← αλλάξε εδώ αν ο φάκελος έχει διαφορετικό όνομα/path
+DATA_DIR = "db"  # ← change this if your folder has a different name/path
 
 # ── Styling ──────────────────────────────────────────────────
 sns.set_theme(style="whitegrid", palette="muted")
@@ -34,12 +34,12 @@ plt.rcParams["figure.dpi"] = 120
 
 
 # =============================================================
-# 1. ΦΟΡΤΩΣΗ ΔΕΔΟΜΕΝΩΝ
+# 1. LOAD DATA
 # =============================================================
 print("=" * 55)
 print("  Olist E-Commerce Demo")
 print("=" * 55)
-print("\n📂 Φόρτωση αρχείων...")
+print("\n📂 Loading files...")
 
 orders       = pd.read_csv(os.path.join(DATA_DIR, "olist_orders_dataset.csv"), parse_dates=[
     "order_purchase_timestamp",
@@ -65,7 +65,7 @@ print(f"  ✔ Customers:   {len(customers):,}")
 # =============================================================
 print("\n📊 EDA...")
 
-# — Revenue ανά μήνα —
+# — Monthly revenue —
 delivered = orders[orders["order_status"] == "delivered"].copy()
 revenue = (
     delivered
@@ -76,7 +76,7 @@ revenue["month"] = revenue["order_purchase_timestamp"].dt.to_period("M")
 monthly = revenue.groupby("month")["payment_value"].sum().reset_index()
 monthly["month_str"] = monthly["month"].astype(str)
 
-# — Top 10 κατηγορίες —
+# — Top 10 categories by revenue —
 items_with_cat = (
     order_items
     .merge(products[["product_id", "product_category_name"]], on="product_id")
@@ -94,14 +94,14 @@ top_cats = (
 )
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 5))
-fig.suptitle("Olist — Επισκόπηση Πωλήσεων", fontsize=14, fontweight="bold")
+fig.suptitle("Olist — Sales Overview", fontsize=14, fontweight="bold")
 
 # subplot 1: monthly revenue
 ax1 = axes[0]
 ax1.bar(monthly["month_str"], monthly["payment_value"] / 1e6, color="#4C72B0")
-ax1.set_title("Μηνιαίο Revenue (εκ. BRL)")
+ax1.set_title("Monthly Revenue (M BRL)")
 ax1.set_xlabel("")
-ax1.set_ylabel("Revenue (εκ. BRL)")
+ax1.set_ylabel("Revenue (M BRL)")
 ax1.yaxis.set_major_formatter(mtick.FormatStrFormatter("%.1f"))
 step = max(1, len(monthly) // 8)
 ax1.set_xticks(range(0, len(monthly), step))
@@ -110,7 +110,7 @@ ax1.set_xticklabels(monthly["month_str"].iloc[::step], rotation=45, ha="right")
 # subplot 2: top categories
 ax2 = axes[1]
 sns.barplot(data=top_cats, y="cat", x="price", ax=ax2, color="#DD8452")
-ax2.set_title("Top 10 Κατηγορίες (Revenue)")
+ax2.set_title("Top 10 Categories (Revenue)")
 ax2.set_xlabel("Revenue (BRL)")
 ax2.set_ylabel("")
 ax2.xaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
@@ -118,7 +118,7 @@ ax2.xaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
 plt.tight_layout()
 plt.savefig("1_eda.png")
 plt.show()
-print("  ✔ Αποθηκεύτηκε: 1_eda.png")
+print("  ✔ Saved: 1_eda.png")
 
 
 # =============================================================
@@ -140,7 +140,8 @@ rfm = rfm_base.groupby("customer_unique_id").agg(
     Monetary  = ("payment_value",             "sum"),
 ).reset_index()
 
-# Scoring 1–5 (robust: προσαρμόζει labels αν τα bins είναι λιγότερα από 5)
+# Score each dimension 1–5
+# Robust version: adjusts labels if qcut produces fewer than 5 bins due to duplicates
 def safe_qcut(series, q=5, ascending=True):
     tmp = pd.qcut(series, q=q, labels=False, duplicates="drop")
     n_bins = tmp.nunique()
@@ -148,7 +149,7 @@ def safe_qcut(series, q=5, ascending=True):
     return pd.qcut(series, q=q, labels=labels, duplicates="drop")
 
 for col in ["Recency", "Frequency", "Monetary"]:
-    ascending = col != "Recency"  # Recency: μικρότερο = καλύτερο
+    ascending = col != "Recency"  # Recency: lower value = better score
     rfm[f"{col}_Score"] = safe_qcut(rfm[col], ascending=ascending)
 
 rfm["RFM_Score"] = (
@@ -174,11 +175,11 @@ def segment(row):
 
 rfm["Segment"] = rfm.apply(segment, axis=1)
 
-seg_counts = rfm["Segment"].value_counts()
+seg_counts  = rfm["Segment"].value_counts()
 seg_revenue = rfm.groupby("Segment")["Monetary"].mean().round(2)
 
-print("\n  Κατανομή Segmentation:")
-print(pd.DataFrame({"Πελάτες": seg_counts, "Μέσο Revenue (BRL)": seg_revenue}).to_string())
+print("\n  Segment breakdown:")
+print(pd.DataFrame({"Customers": seg_counts, "Avg Revenue (BRL)": seg_revenue}).to_string())
 
 palette = {
     "Champions": "#2ecc71", "Loyal": "#3498db", "New Customers": "#9b59b6",
@@ -188,34 +189,37 @@ palette = {
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 fig.suptitle("RFM Customer Segmentation", fontsize=14, fontweight="bold")
 
+# pie chart: customer distribution per segment
 seg_df = seg_counts.reset_index()
 seg_df.columns = ["Segment", "Count"]
 colors = [palette[s] for s in seg_df["Segment"]]
 axes[0].pie(seg_df["Count"], labels=seg_df["Segment"], autopct="%1.1f%%",
             colors=colors, startangle=140)
-axes[0].set_title("% Πελατών ανά Segment")
+axes[0].set_title("Customer % per Segment")
 
+# scatter: recency vs monetary colored by segment
 sns.scatterplot(
     data=rfm.sample(min(3000, len(rfm)), random_state=42),
     x="Recency", y="Monetary", hue="Segment",
     palette=palette, alpha=0.5, ax=axes[1], s=15,
 )
 axes[1].set_title("Recency vs Monetary")
-axes[1].set_xlabel("Recency (μέρες)")
+axes[1].set_xlabel("Recency (days)")
 axes[1].set_ylabel("Monetary (BRL)")
 axes[1].legend(title="Segment", bbox_to_anchor=(1.01, 1), loc="upper left")
 
 plt.tight_layout()
 plt.savefig("2_rfm.png")
 plt.show()
-print("  ✔ Αποθηκεύτηκε: 2_rfm.png")
+print("  ✔ Saved: 2_rfm.png")
 
 
 # =============================================================
-# 4. ML — ΠΡΟΒΛΕΨΗ ΚΑΘΥΣΤΕΡΗΣΗΣ ΠΑΡΑΔΟΣΗΣ
+# 4. ML — DELIVERY DELAY PREDICTION
 # =============================================================
-print("\n🤖 ML: Πρόβλεψη καθυστέρησης παράδοσης...")
+print("\n🤖 ML: Delivery delay prediction...")
 
+# Keep only delivered orders with complete date info
 ml = delivered.dropna(subset=[
     "order_delivered_customer_date",
     "order_estimated_delivery_date",
@@ -223,22 +227,26 @@ ml = delivered.dropna(subset=[
     "order_purchase_timestamp",
 ]).copy()
 
+# Target: 1 if order arrived after the estimated date
 ml["is_late"] = (
     ml["order_delivered_customer_date"] > ml["order_estimated_delivery_date"]
 ).astype(int)
 
+# Feature: hours between purchase and payment approval
 ml["approval_delay"] = (
     ml["order_approved_at"] - ml["order_purchase_timestamp"]
 ).dt.total_seconds() / 3600
 
+# Feature: estimated delivery window in days
 ml["estimated_days"] = (
     ml["order_estimated_delivery_date"] - ml["order_purchase_timestamp"]
 ).dt.days
 
-ml["purchase_month"]    = ml["order_purchase_timestamp"].dt.month
+# Features: time of purchase
+ml["purchase_month"]     = ml["order_purchase_timestamp"].dt.month
 ml["purchase_dayofweek"] = ml["order_purchase_timestamp"].dt.dayofweek
 
-# Προσθήκη αριθμού items ανά παραγγελία
+# Feature: number of items per order
 item_counts = order_items.groupby("order_id")["order_item_id"].count().reset_index()
 item_counts.columns = ["order_id", "n_items"]
 ml = ml.merge(item_counts, on="order_id", how="left")
@@ -260,9 +268,9 @@ clf.fit(X_train, y_train)
 
 print("\n  Classification Report:")
 print(classification_report(y_test, clf.predict(X_test),
-                             target_names=["Εμπρόθεσμη", "Καθυστερημένη"]))
+                             target_names=["On Time", "Late"]))
 
-# Feature importance
+# Plot feature importance
 importance = pd.DataFrame({
     "Feature":    features,
     "Importance": clf.feature_importances_,
@@ -270,16 +278,16 @@ importance = pd.DataFrame({
 
 fig, ax = plt.subplots(figsize=(8, 4))
 ax.barh(importance["Feature"], importance["Importance"], color="#4C72B0")
-ax.set_title("Feature Importance — Καθυστέρηση Παράδοσης", fontweight="bold")
+ax.set_title("Feature Importance — Delivery Delay Prediction", fontweight="bold")
 ax.set_xlabel("Importance")
 plt.tight_layout()
 plt.savefig("3_feature_importance.png")
 plt.show()
-print("  ✔ Αποθηκεύτηκε: 3_feature_importance.png")
+print("  ✔ Saved: 3_feature_importance.png")
 
 
 # =============================================================
 print("\n" + "=" * 55)
-print("  ✅ Demo ολοκληρώθηκε!")
-print("  Αρχεία: 1_eda.png | 2_rfm.png | 3_feature_importance.png")
+print("  ✅ Done!")
+print("  Output: 1_eda.png | 2_rfm.png | 3_feature_importance.png")
 print("=" * 55)
